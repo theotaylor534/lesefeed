@@ -82,6 +82,21 @@ main{max-width:38rem;margin:0 auto;padding-bottom:45vh}
 .gl b{color:var(--gloss);font-weight:600}
 .en{font-family:var(--serif);font-style:italic;color:var(--dim);font-size:.95rem;line-height:1.45;
     margin:.6rem 0 0;padding-left:.75rem;border-left:2px solid var(--line)}
+.en.open{margin-top:0}
+.il{font-size:.8rem;color:#8b919a;margin:.3rem 0 0;line-height:1.5}
+.cap{font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);margin:1rem 0 .3rem}
+.de.echo{margin:0;color:var(--fg)}
+.w{cursor:pointer;-webkit-tap-highlight-color:rgba(29,155,240,.25)}
+.w:active{background:rgba(29,155,240,.22);border-radius:3px}
+.pop{position:absolute;z-index:50;max-width:min(20rem,calc(100vw - 2rem));
+     background:var(--raised);border:1px solid var(--line);border-radius:.7rem;
+     padding:.6rem .75rem;box-shadow:0 6px 24px rgba(0,0,0,.7);
+     display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+.pop b{font-size:.95rem}
+.pop span{color:var(--dim);font-size:.88rem;min-width:0}
+.pop .none{font-style:italic}
+.pop .say{color:var(--dim);display:inline-flex;margin-left:auto}
+.pop .say svg{width:1.05rem;height:1.05rem;fill:currentColor}
 h2.ch{font-size:1.25rem;line-height:1.3;margin:.2rem 0 .35rem;text-wrap:balance}
 .sub{color:var(--dim);font-size:.85rem;margin:0}
 
@@ -208,13 +223,17 @@ function parseDoc(doc,cards){
       if(el.classList.contains("endmark")){cards.push({t:"stop",title:textOf(el)});return}
       if(el.tagName==="LI"||el.classList.contains("howp")||el.tagName==="P"){
         cards.push({t:"plain",lines:[textOf(el)]});return}
-      var de=el.querySelector("p.de"), en=el.querySelector("p.en"), gl=el.querySelectorAll("ul.gl li");
+      var de=el.querySelector("p.de"), en=el.querySelector("p.en"),
+          il=el.querySelector("p.il"), gl=el.querySelectorAll("ul.gl li");
       if(!de) return;
       var lines=de.innerHTML.split(/<br\s*\/?>/i).map(function(x){
         return x.replace(/<[^>]+>/g,"").replace(/&amp;/g,"&").replace(/&lt;/g,"<")
                 .replace(/&gt;/g,">").replace(/&#183;/g,"·").replace(/&#160;|&nbsp;/g," ").trim();
       }).filter(Boolean);
-      cards.push({t:"unit",lines:lines,en:en?textOf(en):"",
+      if(el.classList.contains("closer")){
+        cards.push({t:"closer",en:en?textOf(en):"",lines:lines}); return;
+      }
+      cards.push({t:"unit",lines:lines,en:en?textOf(en):"",il:il?textOf(il):"",
         gl:Array.prototype.map.call(gl,function(li){
           var b=li.querySelector("b"), w=textOf(b);
           return {w:w,g:textOf(li).replace(w,"").trim()};
@@ -275,6 +294,62 @@ document.documentElement.style.setProperty("--sz",SIZES[si]);
 
 function esc(s){return String(s).replace(/[&<>"]/g,function(c){
   return c==="&"?"&amp;":c==="<"?"&lt;":c===">"?"&gt;":"&quot;"})}
+
+/* Every German word is tappable. The dictionary is 59,000 entries shipped
+   with the app, so a lookup costs nothing and works with no signal. */
+var DICT=null;
+function words(line){
+  return esc(line).replace(/[A-Za-zÄÖÜäöüßéèêà]{2,}/g, function(w){
+    return '<span class="w">'+w+"</span>" });
+}
+function deumlaut(s){return s.replace(/ä/g,"a").replace(/ö/g,"o").replace(/ü/g,"u").replace(/ß/g,"ss")}
+function lookupWord(raw){
+  if(!DICT) return null;
+  var w=raw.toLowerCase().replace(/[^a-zäöüß]/g,"");
+  if(!w) return null;
+  var tries=[w, deumlaut(w)];
+  /* inflection, cheaply: German hangs its endings on the back */
+  ["e","en","em","er","es","n","s","nen","ern"].forEach(function(suf){
+    if(w.length>suf.length+2 && w.slice(-suf.length)===suf){
+      var stem=w.slice(0,-suf.length);
+      tries.push(stem, stem+"e", stem+"en", deumlaut(stem), deumlaut(stem)+"en");
+    }
+  });
+  if(/^ge.{3,}/.test(w)){ var p=w.slice(2); tries.push(p, p.replace(/t$/,"en"), p+"en") }
+  if(/^(ab|an|auf|aus|bei|ein|her|hin|mit|nach|vor|zu|über|unter|um|durch)/.test(w)){
+    tries.push(w.replace(/^(ab|an|auf|aus|bei|ein|her|hin|mit|nach|vor|zu|über|unter|um|durch)/,""));
+  }
+  /* an unfamiliar compound is usually two words you know */
+  for(var i=0;i<tries.length;i++){ var hit=DICT[tries[i]]; if(hit) return hit }
+  for(var cut=w.length-4; cut>=4; cut--){
+    var a=DICT[w.slice(0,cut)]||DICT[w.slice(0,cut)+"e"], b=DICT[w.slice(cut).replace(/^[sn]/,"")]||DICT[w.slice(cut)];
+    if(a&&b) return a.split(",")[0]+" + "+b.split(",")[0];
+  }
+  return null;
+}
+var pop=null;
+function closePop(){ if(pop){ pop.remove(); pop=null } }
+function showWord(el){
+  closePop();
+  var raw=el.textContent, g=lookupWord(raw);
+  pop=document.createElement("div"); pop.className="pop";
+  pop.innerHTML="<b>"+esc(raw)+"</b>"+(g?"<span>"+esc(g)+"</span>":
+    '<span class="none">not in the dictionary</span>')+
+    '<button class="say" title="Hear it">'+ICON.say+"</button>";
+  document.body.appendChild(pop);
+  var r=el.getBoundingClientRect();
+  var x=Math.min(Math.max(8,r.left+r.width/2-pop.offsetWidth/2), innerWidth-pop.offsetWidth-8);
+  var above=r.top>pop.offsetHeight+16;
+  pop.style.left=x+"px";
+  pop.style.top=(above? r.top-pop.offsetHeight-8 : r.bottom+8)+scrollY+"px";
+  pop.querySelector(".say").addEventListener("click",function(e){ e.stopPropagation(); speak(raw) });
+}
+document.addEventListener("click",function(e){
+  var w=e.target.closest(".w");
+  if(w){ e.stopPropagation(); showWord(w); return }
+  if(!e.target.closest(".pop")) closePop();
+});
+document.addEventListener("scroll",function(){ closePop() },{passive:true});
 function handle(){ if(!BOOK) return "@book";
   var a=(BOOK.author||BOOK.title||"book").toLowerCase().replace(/[^a-zäöü]+/g,"");
   return "@"+(a.slice(0,16)||"book") }
@@ -360,8 +435,19 @@ function cardEl(i){
   if(c.t==="sub"){
     b.innerHTML='<h2 class="ch">'+esc(c.title)+"</h2>"; return d;
   }
+  if(c.t==="closer"){
+    /* the English for the sentence you have just worked through, then that
+       sentence again -- the last step of the loop, without scrolling back */
+    b.innerHTML='<p class="en open">'+esc(c.en)+"</p>"+
+      '<p class="cap">now read it again</p>'+
+      '<p class="de echo">'+c.lines.map(esc).join(" ")+"</p>"+
+      '<div class="acts"><button class="act" data-a="say" title="Hear it">'+ICON.say+"</button>"+
+      '<button class="act mark'+(marks[i]?" on":"")+'" data-a="mark">'+(marks[i]?ICON.markOn:ICON.mark)+"</button></div>";
+    return d;
+  }
   var txt='<p class="de">'+c.lines.map(function(l,k){
-     return (k?'<span class="br">':"<span>")+esc(l)+"</span>"}).join("")+"</p>";
+     return (k?'<span class="br">':"<span>")+words(l)+"</span>"}).join("")+"</p>";
+  if(c.il) txt+='<p class="il">'+esc(c.il)+"</p>";
   var gl=(c.gl&&c.gl.length)?'<ul class="gl">'+c.gl.map(function(g){
      return "<li><b>"+esc(g.w)+"</b> "+esc(g.g)+"</li>"}).join("")+"</ul>":"";
   var en=c.en?'<p class="en" hidden>'+esc(c.en)+"</p>":"";
@@ -629,6 +715,10 @@ function hashStart(book){
   book.cards.forEach(function(c,i){ if(found===null&&c.t==="head"&&sitNo(c.title)===want) found=i });
   return found;
 }
+/* the tap dictionary loads in the background; the page is readable without it */
+fetch("dict.json").then(function(r){ return r.ok?r.json():null })
+  .then(function(d){ DICT=d }).catch(function(){});
+
 kvGet("book").then(function(saved){
   if(saved&&saved.cards&&saved.cards.length){
     var h=hashStart(saved);
