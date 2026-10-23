@@ -86,6 +86,9 @@ main{max-width:38rem;margin:0 auto;padding-bottom:45vh}
 .il{font-size:.8rem;color:#8b919a;margin:.3rem 0 0;line-height:1.5}
 .cap{font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);margin:1rem 0 .3rem}
 .de.echo{margin:0;color:var(--fg)}
+.warmhead{padding-block:1.6rem .4rem;border-bottom:0}
+.eyebrow.warm{font-size:.7rem;letter-spacing:.14em;text-transform:uppercase;color:#4bbf8a}
+.de.warm{color:#eef1f4}
 .w{cursor:pointer;-webkit-tap-highlight-color:rgba(29,155,240,.25)}
 .w:active{background:rgba(29,155,240,.22);border-radius:3px}
 .pop{position:absolute;z-index:50;max-width:min(20rem,calc(100vw - 2rem));
@@ -104,7 +107,8 @@ main{max-width:38rem;margin:0 auto;padding-bottom:45vh}
       box-shadow:0 4px 18px rgba(0,0,0,.6);transition:opacity .5s}
 .note.go{opacity:0}
 h2.ch{font-size:1.25rem;line-height:1.3;margin:.2rem 0 .35rem;text-wrap:balance}
-.sub{color:var(--dim);font-size:.85rem;margin:0}
+.sub{color:var(--dim);font-size:.85rem;margin:.45rem 0 0}
+.ten{color:var(--dim);font-size:.9rem;font-style:italic;font-family:var(--serif);margin:.3rem 0 0;line-height:1.35}
 
 .acts{display:flex;align-items:center;gap:.25rem;margin:.5rem 0 -.15rem;max-width:22rem}
 .act{display:inline-flex;align-items:center;gap:.3rem;color:var(--dim);font-size:.78rem;
@@ -304,7 +308,7 @@ function esc(s){return String(s).replace(/[&<>"]/g,function(c){
 
 /* Every German word is tappable. The dictionary is 59,000 entries shipped
    with the app, so a lookup costs nothing and works with no signal. */
-var DICT=null;
+var DICT=null, FORMS=null;
 function words(line){
   return esc(line).replace(/[A-Za-zÄÖÜäöüßéèêà]{2,}/g, function(w){
     return '<span class="w">'+w+"</span>" });
@@ -315,6 +319,8 @@ function lookupWord(raw){
   var w=raw.toLowerCase().replace(/[^a-zäöüß]/g,"");
   if(!w) return null;
   var tries=[w, deumlaut(w)];
+  /* the book's own inflected forms, mapped to headwords when it was built */
+  if(FORMS && FORMS[w]) tries.push(FORMS[w]);
   /* inflection, cheaply: German hangs its endings on the back */
   ["e","en","em","er","es","n","s","nen","ern"].forEach(function(suf){
     if(w.length>suf.length+2 && w.slice(-suf.length)===suf){
@@ -328,9 +334,16 @@ function lookupWord(raw){
   }
   /* an unfamiliar compound is usually two words you know */
   for(var i=0;i<tries.length;i++){ var hit=DICT[tries[i]]; if(hit) return hit }
-  for(var cut=w.length-4; cut>=4; cut--){
-    var a=DICT[w.slice(0,cut)]||DICT[w.slice(0,cut)+"e"], b=DICT[w.slice(cut).replace(/^[sn]/,"")]||DICT[w.slice(cut)];
-    if(a&&b) return a.split(",")[0]+" + "+b.split(",")[0];
+  for(var cut=w.length-3; cut>=4; cut--){
+    var head=w.slice(0,cut), tail=w.slice(cut);
+    /* German glues compounds with a linking letter: Heer-es-weg */
+    var heads=[head, head+"e", head.replace(/(es|en|er|s|n|e)$/,"")];
+    var tails=[tail, tail.replace(/^(es|en|er|s|n)/,"")];
+    for(var x=0;x<heads.length;x++) for(var y=0;y<tails.length;y++){
+      var a=DICT[heads[x]], bb=DICT[tails[y]];
+      if(a&&bb&&heads[x].length>=3&&tails[y].length>=3)
+        return a.split(",")[0]+" + "+bb.split(",")[0];
+    }
   }
   return null;
 }
@@ -437,18 +450,35 @@ function cardEl(i){
     var n=sitNo(c.title);
     b.innerHTML=metaLine(n?"Sitting "+n:"Section")+
       '<h2 class="ch">'+esc(stripNum(c.title))+"</h2>"+
+      (c.en?'<p class="ten">'+esc(c.en)+"</p>":"")+
       (c.meta?'<p class="sub">'+esc(c.meta)+"</p>":"");
     return d;
   }
   if(c.t==="sub"){
-    b.innerHTML='<h2 class="ch">'+esc(c.title)+"</h2>"; return d;
+    b.innerHTML='<h2 class="ch">'+esc(c.title)+"</h2>"+
+      (c.en?'<p class="ten">'+esc(c.en)+"</p>":""); return d;
+  }
+  if(c.t==="warmhead"){
+    d.className="post warmhead"; d.style.display="block";
+    d.innerHTML='<span class="eyebrow warm">'+esc(c.title)+"</span>";
+    return d;
+  }
+  if(c.t==="warm"){
+    /* plain German written for this reader, with the English kept visible --
+       this tier is a run-up, not a test */
+    b.innerHTML=(cont?"":metaLine("Vorlauf"))+
+      '<p class="de warm">'+c.lines.map(words).join(" ")+"</p>"+
+      '<p class="en open">'+esc(c.en)+"</p>"+
+      '<div class="acts"><button class="act" data-a="say">'+ICON.say+"</button>"+
+      '<button class="act mark'+(marks[i]?" on":"")+'" data-a="mark">'+(marks[i]?ICON.markOn:ICON.mark)+"</button></div>";
+    return d;
   }
   if(c.t==="closer"){
     /* the English for the sentence you have just worked through, then that
        sentence again -- the last step of the loop, without scrolling back */
     b.innerHTML='<p class="en open">'+esc(c.en)+"</p>"+
       '<p class="cap">now read it again</p>'+
-      '<p class="de echo">'+c.lines.map(esc).join(" ")+"</p>"+
+      '<p class="de echo">'+c.lines.map(words).join(" ")+"</p>"+
       '<div class="acts"><button class="act" data-a="say" title="Hear it">'+ICON.say+"</button>"+
       '<button class="act mark'+(marks[i]?" on":"")+'" data-a="mark">'+(marks[i]?ICON.markOn:ICON.mark)+"</button></div>";
     return d;
@@ -498,8 +528,14 @@ function mark(){
   if(!BOOK||!BOOK.cards.length) return;
   var pct=Math.min(100,Math.round((at+1)/BOOK.cards.length*100));
   rail.style.width=pct+"%";
-  var s=sittingOf(at);
-  posEl.textContent=pct+"%"+(s?" · "+(s.n?"Sitting "+s.n:s.title.slice(0,28)):"");
+  /* a percentage that reads 0% for a fortnight tells you nothing; the sitting
+     you are on, out of the sittings there are, tells you where you stand */
+  var s=sittingOf(at), total=0;
+  for(var j=0;j<BOOK.cards.length;j++) if(BOOK.cards[j].t==="head") total++;
+  var sk=streak();
+  posEl.textContent=(s&&s.n ? "Sitting "+s.n+" of "+total
+                            : (s? s.title.slice(0,24) : pct+"%"))
+                  + (sk.n ? " · day "+sk.n : "");
 }
 
 /* ---------- interaction ---------- */
@@ -746,6 +782,8 @@ function hashStart(book){
 /* the tap dictionary loads in the background; the page is readable without it */
 fetch("dict.json").then(function(r){ return r.ok?r.json():null })
   .then(function(d){ DICT=d }).catch(function(){});
+fetch("forms.json").then(function(r){ return r.ok?r.json():null })
+  .then(function(f){ FORMS=f }).catch(function(){});
 
 function sittingNumberAt(book,i){
   for(var j=i;j>=0;j--){ if(book.cards[j].t==="head") return sitNo(book.cards[j].title) }
