@@ -56,7 +56,7 @@ nav button{flex:1;padding:.85rem 0 .7rem;color:var(--dim);font-size:.88rem;font-
 nav button[aria-selected="true"]{color:var(--fg)}
 nav button[aria-selected="true"]::after{content:"";position:absolute;left:50%;transform:translateX(-50%);
      bottom:0;width:3.4rem;height:4px;border-radius:999px;background:var(--accent)}
-.rail{height:2px;background:transparent}
+.rail{display:none}
 .rail i{display:block;height:100%;width:0;background:var(--accent);transition:width .3s ease}
 
 /* ---------- posts ---------- */
@@ -413,7 +413,6 @@ function sitPos(i){
   return (i-s.i)+"/"+(end-s.i-1);
 }
 function actRow(i,c){
-  var pct=sitPos(i);
   var h='<div class="acts">';
   if(c.en) h+='<button class="act en-t" data-a="en" title="Show the English">'+ICON.en+"<span>English</span></button>";
   if(c.il) h+='<button class="act" data-a="il" title="Word for word">'+ICON.il+"</button>";
@@ -421,7 +420,6 @@ function actRow(i,c){
   h+='<button class="act mark'+(marks[i]?" on":"")+'" data-a="mark" title="Save this sentence">'+
        (marks[i]?ICON.markOn:ICON.mark)+"</button>";
   h+='<button class="act" data-a="copy" title="Copy the German">'+ICON.copy+"</button>";
-  h+='<span class="act wide" title="where you are in this sitting">'+ICON.bar+"<span>"+pct+"</span></span>";
   return h+"</div>";
 }
 function cardEl(i){
@@ -526,15 +524,10 @@ function show(book,start){
 }
 function mark(){
   if(!BOOK||!BOOK.cards.length) return;
-  var pct=Math.min(100,Math.round((at+1)/BOOK.cards.length*100));
-  rail.style.width=pct+"%";
-  /* a percentage that reads 0% for a fortnight tells you nothing; the sitting
-     you are on, out of the sittings there are, tells you where you stand */
-  var s=sittingOf(at), total=0;
-  for(var j=0;j<BOOK.cards.length;j++) if(BOOK.cards[j].t==="head") total++;
-  var sk=streak();
-  posEl.textContent=(s&&s.n ? "Sitting "+s.n+" of "+total
-                            : (s? s.title.slice(0,24) : pct+"%"))
+  /* no counts, no percentage, no page number: nothing that invites you to
+     measure how far you have got instead of reading */
+  var s=sittingOf(at), sk=streak();
+  posEl.textContent=(s&&s.n ? "Sitting "+s.n : (s? s.title.slice(0,24) : ""))
                   + (sk.n ? " · day "+sk.n : "");
 }
 
@@ -794,12 +787,36 @@ function headOfSitting(book,n){
     if(book.cards[j].t==="head" && sitNo(book.cards[j].title)===n) return j }
   return 0;
 }
-/* A rebuilt book has different card numbers, so a saved position is only
-   meaningful as a sitting. Carry that across and start the sitting again. */
+/* A rebuild renumbers the sittings, so a saved sitting number means nothing.
+   What does survive is how far into the book you had read, counted in German
+   words. Find that point in the new build and start at the sitting holding it. */
+function wordsUpTo(book,i){
+  var n=0;
+  for(var j=0;j<i&&j<book.cards.length;j++){
+    var c=book.cards[j];
+    if(c.t==="unit"||c.t==="plain"){
+      var ls=c.lines||[];
+      for(var k=0;k<ls.length;k++) n+=ls[k].split(/\s+/).length;
+    }
+  }
+  return n;
+}
 function adopt(fresh,saved,pos){
   if(!saved || saved.v===fresh.v) return null;
-  var n=sittingNumberAt(saved,pos||0);
-  return n? headOfSitting(fresh,n) : 0;
+  var target=wordsUpTo(saved,pos||0);
+  if(!target) return 0;
+  var n=0, hit=fresh.cards.length-1;
+  for(var j=0;j<fresh.cards.length;j++){
+    var c=fresh.cards[j];
+    if(c.t==="unit"||c.t==="plain"){
+      var ls=c.lines||[];
+      for(var k=0;k<ls.length;k++) n+=ls[k].split(/\s+/).length;
+    }
+    if(n>=target){ hit=j; break }
+  }
+  /* start at the top of whatever sitting that lands in */
+  for(var b=hit;b>=0;b--) if(fresh.cards[b].t==="head") return b;
+  return 0;
 }
 kvGet("book").then(function(saved){
   if(saved&&saved.cards&&saved.cards.length){
@@ -809,8 +826,8 @@ kvGet("book").then(function(saved){
           var start=adopt(fresh,saved,pos);
           kvSet("book",fresh); kvSet("pos:"+fresh.id,start||0);
           show(fresh,start||0);
-          note("Updated to the newest build \u2014 back at the start of sitting "+
-               (sittingNumberAt(fresh,start||0)||1)+".");
+          note("Updated \u00b7 picking up at sitting "+
+               (sittingNumberAt(fresh,start||0)||1)+", where you had read to.");
           return;
         }
         var h=hashStart(saved);
